@@ -9,6 +9,7 @@ fn main() {
         "index.html",
         "package.json",
         "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
         "vite.config.ts",
         "tsconfig.json",
         "tsconfig.app.json",

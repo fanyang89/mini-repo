@@ -1,0 +1,3 @@
+# shadcn 4.23 still pulls minimatch 10 via ts-morph (GHSA-g3hv-75wg-m249).
+overrides:
+  '@ts-morph/common@0.27.0>minimatch': '11.0.9'
