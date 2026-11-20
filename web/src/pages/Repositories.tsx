@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertCircle,
   Check,
@@ -140,25 +140,36 @@ function Chip({ active, children, onClick }: { active: boolean; children: React.
   )
 }
 
+async function packagePage(repos: RepoInfo[], query: string, offset: number) {
+  const rows: { repo: string; entry: Entry; deletable: boolean }[] = []
+  let more = false
+  for (const r of repos) {
+    const entries = await listPackages(r.repo.id, query, offset)
+    more ||= entries.length === 100
+    rows.push(...entries.map(entry => ({ repo: r.repo.id, entry, deletable: r.delete })))
+  }
+  return { rows, more }
+}
+
 export function Repositories() {
   const [repos, setRepos] = useState<RepoInfo[] | null>(null)
   const [arch, setArch] = useState("")
-  const [selectedId, setSelectedId] = useState("")
+  const [selectedId, setSelectedId] = useState(() => new URLSearchParams(location.search).get("repo") ?? "")
   const [query, setQuery] = useState("")
   const [all, setAll] = useState(false)
-  const [rows, setRows] = useState<{ repo: string; entry: Entry; deletable: boolean }[]>([])
-  const [searched, setSearched] = useState(false)
-  const [more, setMore] = useState(false)
+  const [result, setResult] = useState<Awaited<ReturnType<typeof packagePage>> & {
+    repos: RepoInfo[]; query: string; offset: number
+  }>()
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm, setCreateForm] = useState(EMPTY_FORM)
   const [deleteRepoOpen, setDeleteRepoOpen] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<{ repo: string; nevra: string; href: string } | null>(null)
-  const offset = useRef(0)
+  const request = useRef<symbol | null>(null)
   const pendingDeletes = useRef(new Set<string>())
   const settledSeen = useRef(new Set<string>())
 
-  const filtered = (repos ?? []).filter((r) => !arch || r.repo.arch === arch)
+  const filtered = useMemo(() => (repos ?? []).filter((r) => !arch || r.repo.arch === arch), [repos, arch])
   // Filters can invalidate the stored selection; fall back to the first match.
   const selected = filtered.some((r) => r.repo.id === selectedId)
     ? selectedId
@@ -167,28 +178,17 @@ export function Repositories() {
   const jobs = useRepoJobs(selected, current?.write === true)
   const uploadHref = `${new URL("mini-repo/upload", rootUrl).pathname}?repo=${selected}`
 
-  const search = async (reset: boolean) => {
-    try {
-      if (reset) {
-        offset.current = 0
-        setRows([])
-      }
-      const visible = filtered.filter((r) => r.read && (all || r.repo.id === selected))
-      let hasMore = false
-      const next: typeof rows = []
-      for (const r of visible) {
-        const entries = await listPackages(r.repo.id, query, offset.current)
-        hasMore ||= entries.length === 100
-        next.push(...entries.map((entry) => ({ repo: r.repo.id, entry, deletable: r.delete })))
-      }
-      offset.current += 100
-      setRows(next)
-      setMore(hasMore)
-      setSearched(true)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    }
-  }
+  const visible = useMemo(() => filtered.filter(r => r.read && (all || r.repo.id === selected)), [filtered, all, selected])
+  const page = result?.repos === visible && result.query === query ? result : undefined
+  const search = useCallback((offset = 0) => {
+    const id = Symbol()
+    request.current = id
+    return packagePage(visible, query, offset).then(data => {
+      if (id === request.current) setResult({ ...data, repos: visible, query, offset })
+    }).catch((e: unknown) => {
+      if (id === request.current) toast.error(e instanceof Error ? e.message : String(e))
+    })
+  }, [visible, query])
 
   const reload = async (keep?: string) => {
     const list = await listRepos()
@@ -199,13 +199,13 @@ export function Repositories() {
   }
 
   useEffect(() => {
-    const initial = new URLSearchParams(location.search).get("repo") ?? ""
-    reload(initial || undefined)
+    listRepos().then(setRepos)
   }, [])
 
   useEffect(() => {
-    if (selected) search(true)
-  }, [selected, query, all]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (selected) search()
+    return () => { request.current = null }
+  }, [selected, search])
 
   // Refresh the table whenever a job settles: a publish may land after a
   // search raced it, and deletions must clear their row.
@@ -221,8 +221,8 @@ export function Repositories() {
         else toast.success("RPM deleted.")
       }
     }
-    search(true)
-  }, [jobs.jobs]) // eslint-disable-line react-hooks/exhaustive-deps
+    search()
+  }, [jobs.jobs, search])
 
   // "/" focuses package search.
   useEffect(() => {
@@ -399,7 +399,7 @@ export function Repositories() {
                     className="flex flex-wrap items-center gap-3"
                     onSubmit={(e) => {
                       e.preventDefault()
-                      search(true)
+                      search()
                     }}
                   >
                     <div className="relative min-w-56 flex-1">
@@ -418,7 +418,7 @@ export function Repositories() {
                     </label>
                     <Button type="submit" variant="secondary">Search</Button>
                   </form>
-                  {rows.length > 0 ? (
+                  {page && page.rows.length > 0 ? (
                     <>
                       <div className="overflow-hidden rounded-lg border">
                         <Table>
@@ -430,7 +430,7 @@ export function Repositories() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {rows.map(({ repo, entry, deletable }) => (
+                            {page.rows.map(({ repo, entry, deletable }) => (
                               <TableRow key={`${repo}/${entry.href}`}>
                                 <TableCell className="text-muted-foreground">{repo}</TableCell>
                                 <TableCell className="min-w-0">
@@ -459,13 +459,13 @@ export function Repositories() {
                           </TableBody>
                         </Table>
                       </div>
-                      {more && (
-                        <Button variant="outline" onClick={() => search(false)}>
+                      {page.more && (
+                        <Button variant="outline" onClick={() => search(page.offset + 100)}>
                           More results
                         </Button>
                       )}
                     </>
-                  ) : searched ? (
+                  ) : page ? (
                     <EmptyState
                       icon={Search}
                       title="No matching package"
