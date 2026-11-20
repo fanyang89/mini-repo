@@ -56,7 +56,7 @@ def build_rpms(work):
     return sorted((work / "RPMS/noarch").glob("*.rpm"))
 
 
-def smoke(binary, work):
+def smoke(binary, work, ui=False):
     rpms = build_rpms(work)
     assert len(rpms) == 5
     base = work / "base"
@@ -139,6 +139,11 @@ def smoke(binary, work):
     p = start()
     try:
         wait(lambda: http("/__dufs__/health"))
+        if ui:
+            script = Path(__file__).resolve().parents[1] / "web/tests/ui.mjs"
+            subprocess.run(
+                ["node", script, url, rpms[0], auth], check=True, timeout=120
+            )
         assert b"__INDEX_DATA__" not in http("/") and b"DUFS" in http("/").upper()
         # SPA shell plus its hashed bundle, with a history-routing fallback.
         page = http("/mini-repo/upload")
@@ -385,7 +390,10 @@ def smoke(binary, work):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", type=Path, default=Path("target/debug/mini-repo"))
+    parser.add_argument(
+        "--ui", action="store_true", help="also exercise the SPA in Chromium"
+    )
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
-        smoke(args.binary.resolve(), Path(tmp))
+        smoke(args.binary.resolve(), Path(tmp), args.ui)
     print("OK: uploads, restart, incremental publication, isolation, permissions, DNF")

@@ -1,26 +1,19 @@
-// Full UI flow against a scratch instance: create/edit repo, upload, delete RPM, delete repo.
-// Requires: built binary, Chromium headless shell ($CHROME), a sample RPM ($SAMPLE).
-const { chromium } = require('playwright')
-const fs = require('fs'), net = require('net'), cp = require('child_process')
+// tests/smoke.py --ui supplies a scratch server and a generated noarch RPM.
+import { chromium } from 'playwright'
+import { basename } from 'node:path'
+
+const [url, sample, authorization] = process.argv.slice(2)
+const filename = basename(sample)
 const repoInList = (t) =>
   [...document.querySelectorAll('aside button')].some((b) => b.textContent.includes(t))
 
-;(async () => {
-  const dir = fs.mkdtempSync('/tmp/opencode/mini-spa-')
-  const bin = 'target/release/mini-repo'
-  cp.execFileSync(bin, ['create', dir])
-  const s = net.createServer(); await new Promise(r => s.listen(0, '127.0.0.1', r))
-  const port = s.address().port; await new Promise(r => s.close(r))
-  const child = cp.spawn(bin, ['serve', dir, '-p', String(port)])
-  let b
+async function testUI() {
+  const b = await chromium.launch()
   let step = 0
   const say = (name) => console.log(`step ${++step}: ${name}`)
   try {
-    await new Promise((r, j) => { child.stdout.once('data', r); child.once('error', j) })
-    b = await chromium.launch({ executablePath: process.env.CHROME })
-    const p = await b.newPage()
+    const p = await b.newPage({ extraHTTPHeaders: { Authorization: authorization } })
     p.on('pageerror', e => console.error('PAGEERROR', e))
-    const url = `http://127.0.0.1:${port}`
 
     say('open'); await p.goto(url + '/mini-repo/')
     say('empty state'); await p.getByRole('button', { name: 'Create repository' }).first().click()
@@ -38,14 +31,14 @@ const repoInList = (t) =>
 
     say('open upload'); await p.getByRole('button', { name: 'Upload', exact: true }).click()
     say('pick repo'); await p.locator('button[role="combobox"]').click(); await p.getByRole('option').click()
-    say('choose file'); await p.locator('input[type=file]').setInputFiles(process.env.SAMPLE)
+    say('choose file'); await p.locator('input[type=file]').setInputFiles(sample)
     say('upload batch'); await p.getByRole('button', { name: 'Upload batch' }).click()
-    say('published'); await p.waitForFunction(() =>
+    say('published'); await p.waitForFunction((file) =>
       [...document.querySelectorAll('li')].some((li) =>
-        li.textContent.includes('published') && li.textContent.includes('rpm-basic')), null, { timeout: 25000 })
+        li.textContent.includes('published') && li.textContent.includes(file)), filename, { timeout: 25000 })
 
     say('back to repositories'); await p.getByRole('button', { name: 'Repositories' }).click()
-    say('package listed'); await p.waitForFunction(() => document.querySelector('table')?.textContent.includes('rpm-basic'))
+    say('package listed'); await p.locator(`table a[href$="/${filename}"]`).waitFor()
     say('delete rpm'); await p.getByRole('button', { name: 'Delete', exact: true }).click()
     say('confirm'); await p.getByRole('button', { name: 'Delete', exact: true }).click()
     say('table empty'); await p.waitForFunction(() => !document.querySelector('table tbody tr'))
@@ -59,8 +52,8 @@ const repoInList = (t) =>
   } catch (e) {
     console.error(`failed at step ${step}`); console.error(e); process.exitCode = 1
   } finally {
-    await b?.close(); child.kill('SIGKILL')
-    await new Promise(r => child.once('exit', r))
-    fs.rmSync(dir, { recursive: true, force: true })
+    await b.close()
   }
-})()
+}
+
+await testUI()

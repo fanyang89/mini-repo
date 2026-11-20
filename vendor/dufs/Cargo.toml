@@ -1,11 +1,12 @@
 [package]
 name = "mini-repo"
-version = "0.47.0"
+version.workspace = true
 edition = "2021"
-authors = ["sigoden <sigoden@gmail.com>"]
-description = "Dufs is a distinctive utility file server"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/sigoden/dufs"
+description = "Serve and manage RPM repositories with a built-in web UI"
+# Upstream dufs licenses are retained in LICENSE-MIT and LICENSE-APACHE.
+license.workspace = true
+repository.workspace = true
+publish = false
 categories = ["command-line-utilities", "web-programming::http-server"]
 keywords = ["static", "file", "server", "webdav", "cli"]
 

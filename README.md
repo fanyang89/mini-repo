@@ -12,16 +12,13 @@ master-detail layout: repository list and filters on the left, and per-repo
 tabs (Packages, Jobs, Settings, DNF) on the right. It follows the system color
 scheme with a manual light/dark toggle. `cargo build` embeds `web/dist` into
 the binary: the crate's build script re-runs `pnpm build` whenever the SPA
-sources change, so shipping stays a single executable. `pnpm` (with Node ≥ 20)
-is required on the build machine.
+sources change, so shipping stays a single executable.
 
 ## Run
 
--Build on Linux with a current stable Rust toolchain, a C compiler, pkg-config
--and SQLite development headers. Initialize an empty or new base directory once:
-+Build on Linux with a current stable Rust toolchain, a C compiler, pkg-config,
-+SQLite development headers, Node ≥ 20 and pnpm. Initialize an empty or new base
-+directory once:
+Build on Linux with a C compiler, pkg-config and SQLite development headers.
+CI uses Rust 1.100.0, Node.js 22.23.1 and pnpm 12.11.2.
+From the repository root, build and initialize a new or empty base directory:
 
 ```sh
 cargo build --release --locked
@@ -29,25 +26,10 @@ target/release/mini-repo create ./data
 target/release/mini-repo serve ./data
 ```
 
--Open http://127.0.0.1:5000/mini-repo/ and create e.g. `el9-x86_64` (EL, 9,
--x86_64) and `oe-aarch64` (openEuler, 24.03, aarch64). Open **Upload RPM**,
--choose a repository and drop files. The original file browser is still at
--http://127.0.0.1:5000/ and provides upload directories under `incoming/`.
-+Open http://127.0.0.1:5000/mini-repo/ and create e.g. `el9-x86_64` (EL, 9,
-+x86_64) and `oe-aarch64` (openEuler, 24.03, aarch64). Open **Upload RPM**,
-+choose a repository and drop files. The original file browser is still at
-+http://127.0.0.1:5000/ and provides upload directories under `incoming/`.
-+
-+### SPA development
-+
-+```sh
-+cd web && pnpm install
-+pnpm dev   # Vite dev server with HMR; proxies /mini-repo/api, /incoming, /repos
-+```
-+
-+Run the Rust server on port 5000 (`mini-repo serve ./data`) and open the Vite
-+dev URL. Production builds go through `cargo build`; `web/dist` is generated
-+and must not be edited by hand.
+Open http://127.0.0.1:5000/mini-repo/ and create a repository such as
+`el9-x86_64`. Open **Upload**, select the repository and drop RPM files.
+The original file browser is at http://127.0.0.1:5000/.
+
 Edit `data/mini-repo.yaml` to change the listener and access rules; restart with
 the same `serve` command. The default binds to loopback with uploads and
 deletes enabled. For network deployment, use dufs HTTPS or a TLS reverse
@@ -162,24 +144,41 @@ are reserved HTTP namespaces; existing unmanaged repositories are not imported.
 Failed jobs retain their uploads for retry. This version publishes standard
 package indexes, not modularity, advisories, or signed `repomd.xml`.
 
-Upstream dufs source and licenses are in `vendor/dufs/`, pinned at
-`77291a230565ca090a1d7751d07db82ac418906d`. Its UI assets are unmodified.
-The HTTP integration lives in `vendor/dufs/src/mini.rs`; storage and
-publication live in `mini-repo/src/`; the SPA in `web/src/`.
-Upstream: https://github.com/sigoden/dufs
+## Project layout
+
+| Path | Start here for |
+| --- | --- |
+| `Cargo.toml` | Workspace members and Mini Repo product version. The default member builds the server binary. |
+| `vendor/dufs/src/` | Product entry point: `main.rs` starts the server; `mini.rs` connects its HTTP routes to the core. |
+| `mini-repo/src/` | `mini-repo-core`: storage and SQLite catalog in `lib.rs`, RPM publication in `publish.rs`. |
+| `web/` | React management UI. See [frontend development](web/README.md) for the dev server and proxy. |
+| `tests/`, `web/tests/`, `vendor/dufs/tests/` | Product smoke test, browser flow and Rust integration tests, respectively. |
+
+The server is a modified copy of [dufs](https://github.com/sigoden/dufs)
+0.47.0 at `77291a230565ca090a1d7751d07db82ac418906d`. Its file-browser
+assets are unmodified.
 
 ## Verification
 
 ```sh
 cargo build --locked
-cargo test --locked -p mini-repo --test allow
-python3 tests/smoke.py
-node tests/ui.js   # needs $CHROME and $SAMPLE; see the script header
+pnpm --dir web lint
+cargo test --workspace --locked
+pnpm --dir web exec playwright install --with-deps --only-shell chromium
+python3 tests/smoke.py --ui
 ```
 
 The smoke test requires `rpmbuild` and `dnf`. It builds five RPMs in a temporary
 directory, starts a private loopback server, and checks batched publication,
 resume, restart, repository isolation, corruption, old manifest URLs,
-download checksums, access rules and DNF package discovery. `tests/ui.js`
-drives the React SPA in headless Chromium through create, edit, upload,
-RPM deletion and repository deletion.
+download checksums, access rules and DNF package discovery. `--ui` also drives
+the SPA through create, edit, upload and deletion using the same server and
+one of those RPMs. Omit `--ui` to run the smoke test without a browser.
+Both use `target/debug/mini-repo` by default; pass `--binary PATH` to test
+another build.
+
+## License
+
+Mini Repo's original code is licensed under the [MIT License](LICENSE).
+The upstream dufs code retains its [MIT](vendor/dufs/LICENSE-MIT) or
+[Apache-2.0](vendor/dufs/LICENSE-APACHE) licensing.

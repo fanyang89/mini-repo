@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "mini-repo"
-version = "0.47.0"
+version = "0.1.0"
 dependencies = [
  "alphanumeric-sort",
  "anyhow",
